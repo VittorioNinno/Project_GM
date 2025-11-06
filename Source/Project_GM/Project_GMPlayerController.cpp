@@ -1,6 +1,5 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-
 #include "Project_GMPlayerController.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
@@ -13,6 +12,9 @@ void AProject_GMPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 
+	/** Chiamato per l'input di scatto */
+	void OnDash();
+
 	// only spawn touch controls on local player controllers
 	if (SVirtualJoystick::ShouldDisplayTouchInterface() && IsLocalPlayerController())
 	{
@@ -23,13 +25,11 @@ void AProject_GMPlayerController::BeginPlay()
 		{
 			// add the controls to the player screen
 			MobileControlsWidget->AddToPlayerScreen(0);
-
-		} else {
-
-			UE_LOG(LogProject_GM, Error, TEXT("Could not spawn mobile controls widget."));
-
 		}
-
+		else
+		{
+			UE_LOG(LogProject_GM, Error, TEXT("Could not spawn mobile controls widget."));
+		}
 	}
 }
 
