@@ -8,79 +8,71 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
-#include "Project_GM.h"
+
+// Include component headers to use their functionality
+#include "CharacterComponents/DashComponent.h"
+#include "CharacterComponents/WallMechanicsComponent.h"
+
+DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 
 AProject_GMCharacter::AProject_GMCharacter()
 {
-	// Enable tick
+	// Enable tick for sliding logic monitoring
 	PrimaryActorTick.bCanEverTick = true;
-	
+
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
-		
-	// Don't rotate when the controller rotates. Let that just affect the camera.
+
+	// Disable controller rotation affecting the character mesh directly
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
 
 	// Configure character movement
-	GetCharacterMovement()->bOrientRotationToMovement = true;
-	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
+	GetCharacterMovement()->bOrientRotationToMovement = true; 
+	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f); 
 
-	// Note: For faster iteration times these variables, and many more, can be tweaked in the Character Blueprint
-	// instead of recompiling to adjust them
+	// Movement defaults
 	GetCharacterMovement()->JumpZVelocity = 500.f;
 	GetCharacterMovement()->AirControl = 0.35f;
 	GetCharacterMovement()->MaxWalkSpeed = 500.f;
 	GetCharacterMovement()->MinAnalogWalkSpeed = 20.f;
 	GetCharacterMovement()->BrakingDecelerationWalking = 2000.f;
 	GetCharacterMovement()->BrakingDecelerationFalling = 1500.0f;
+	
+	// Enable Double Jump
+	JumpMaxCount = 2;
 
-	// Create a camera boom (pulls in towards the player if there is a collision)
+	// Store default physics values for reset logic later
+	DefaultGroundFriction = GetCharacterMovement()->GroundFriction;
+	DefaultWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
+	DefaultCrouchedWalkSpeed = GetCharacterMovement()->MaxWalkSpeedCrouched;
+
+	// Enable crouching capability on the movement component
+	GetCharacterMovement()->NavAgentProps.bCanCrouch = true;
+
+	// Create a camera boom
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
-	CameraBoom->TargetArmLength = 400.0f;
-	CameraBoom->bUsePawnControlRotation = true;
+	CameraBoom->TargetArmLength = 400.0f; 
+	CameraBoom->bUsePawnControlRotation = true; 
 
 	// Create a follow camera
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
-	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
-	FollowCamera->bUsePawnControlRotation = false;
-
-	// Initialize dash cooldown
-	LastDashTime = -DashCooldown; // Allows dashing immediately
-
-	// Allows the character to double jump (1 on ground + 1 in air)
-	JumpMaxCount = 2;
-
-	// Enable crouching
-	GetCharacterMovement()->NavAgentProps.bCanCrouch = true;
-	
-	// Store default friction
-	DefaultGroundFriction = GetCharacterMovement()->GroundFriction;
-
-	// Store default walk speed
-	DefaultWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
-
-	// Store default crouched walk speed
-	DefaultCrouchedWalkSpeed = GetCharacterMovement()->MaxWalkSpeedCrouched;
-
-	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
-	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
+	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName); 
+	FollowCamera->bUsePawnControlRotation = false; 
 }
 
 void AProject_GMCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
-	// Set up action bindings
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent)) {
 		
-		// Jumping
-		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
+		// Jump is bound to DoJumpStart to allow intercepting input for Wall Jump check
+		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &AProject_GMCharacter::DoJumpStart);
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 
 		// Moving
 		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AProject_GMCharacter::Move);
-		EnhancedInputComponent->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &AProject_GMCharacter::Look);
 
 		// Looking
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AProject_GMCharacter::Look);
@@ -88,176 +80,87 @@ void AProject_GMCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		// Dashing
 		EnhancedInputComponent->BindAction(DashAction, ETriggerEvent::Started, this, &AProject_GMCharacter::OnDash);
 
-		// Crouching
-		EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Started, this, &AProject_GMCharacter::StartCrouch);
-		EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Completed, this, &AProject_GMCharacter::StopCrouch);
-
 		// Sprinting
 		EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Started, this, &AProject_GMCharacter::StartSprint);
 		EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &AProject_GMCharacter::StopSprint);
+
+		// Crouching and Sliding
+		EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Started, this, &AProject_GMCharacter::StartCrouch);
+		EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Completed, this, &AProject_GMCharacter::StopCrouch);
 	}
 	else
 	{
-		UE_LOG(LogProject_GM, Error, TEXT("'%s' Failed to find an Enhanced Input component! This template is built to use the Enhanced Input system. If you intend to use the legacy system, then you will need to update this C++ file."), *GetNameSafe(this));
-	}
-}
-
-/** This is the Tick function, called every frame */
-void AProject_GMCharacter::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
-
-	// Check if we should stop sliding
-	if (bIsSliding)
-	{
-		float GroundSpeed = GetVelocity().Size2D();
-
-		// Stop sliding if we lose speed or fall off a ledge
-		if (GroundSpeed < MinSlideSpeed || !GetCharacterMovement()->IsMovingOnGround())
-		{
-			// Stop the slide logic, but don't UnCrouch().
-			// This allows the player to remain crouched if they are still
-			// holding the crouch button.
-			StopSlide();
-		}
+		UE_LOG(LogTemplateCharacter, Error, TEXT("'%s' Failed to find an Enhanced Input component!"), *GetNameSafe(this));
 	}
 }
 
 void AProject_GMCharacter::Move(const FInputActionValue& Value)
 {
-	//	input is a Vector2D
 	FVector2D MovementVector = Value.Get<FVector2D>();
 
-	//	route the input
-	DoMove(MovementVector.X, MovementVector.Y);
+	if (Controller != nullptr)
+	{
+		const FRotator Rotation = Controller->GetControlRotation();
+		const FRotator YawRotation(0, Rotation.Yaw, 0);
+
+		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+		AddMovementInput(ForwardDirection, MovementVector.Y);
+		AddMovementInput(RightDirection, MovementVector.X);
+	}
 }
 
 void AProject_GMCharacter::Look(const FInputActionValue& Value)
 {
-	//	input is a Vector2D
 	FVector2D LookAxisVector = Value.Get<FVector2D>();
 
-	//	route the input
-	DoLook(LookAxisVector.X, LookAxisVector.Y);
-}
-
-void AProject_GMCharacter::DoMove(float Right, float Forward)
-{
-	if (GetController() != nullptr)
+	if (Controller != nullptr)
 	{
-		//	find out which way is forward
-		const FRotator Rotation = GetController()->GetControlRotation();
-		const FRotator YawRotation(0, Rotation.Yaw, 0);
-
-		//	get forward vector
-		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-
-		//	get right vector 
-		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-
-		//	add movement 
-		AddMovementInput(ForwardDirection, Forward);
-		AddMovementInput(RightDirection, Right);
+		AddControllerYawInput(LookAxisVector.X);
+		AddControllerPitchInput(LookAxisVector.Y);
 	}
 }
 
-void AProject_GMCharacter::DoLook(float Yaw, float Pitch)
-{
-	if (GetController() != nullptr)
-	{
-		//	add yaw and pitch input to controller
-		AddControllerYawInput(Yaw);
-		AddControllerPitchInput(Pitch);
-	}
-}
+// --- MOVEMENT ABILITIES & LOGIC ---
 
 void AProject_GMCharacter::DoJumpStart()
 {
-	//	signal the character to jump
-	Jump();
-}
+	// Try to find the Wall Mechanics Component
+	UWallMechanicsComponent* WallMechComp = FindComponentByClass<UWallMechanicsComponent>();
 
-void AProject_GMCharacter::DoJumpEnd()
-{
-	//	signal the character to stop jumping
-	StopJumping();
+	// Attempt Wall Jump if component exists
+	if (WallMechComp && WallMechComp->AttemptWallJump())
+	{
+		// Reset jump count on successful wall jump
+		JumpCurrentCount = 0;
+		return;
+	}
+
+	// Fallback to standard jump behavior
+	Jump();
 }
 
 void AProject_GMCharacter::OnDash()
 {
-	// Check if the game world is valid and the cooldown has elapsed
-	UWorld* World = GetWorld();
-	if (World == nullptr || World->GetTimeSeconds() < LastDashTime + DashCooldown)
+	// Prevent dashing while on the ground to allow Sprint input priority
+	if (GetCharacterMovement()->IsMovingOnGround())
 	{
-		// Cooldown not finished yet
 		return;
 	}
 
-	// Calculate dash direction
-	FVector DashDirection;
+	// Try to find the Dash Component representing the unlockable ability
+	UDashComponent* DashComp = FindComponentByClass<UDashComponent>();
 
-	// Prioritize the player's input direction
-	FVector InputAcceleration = GetCharacterMovement()->GetCurrentAcceleration().GetSafeNormal();
-	if (!InputAcceleration.IsNearlyZero())
+	if (DashComp)
 	{
-		DashDirection = InputAcceleration;
+		DashComp->PerformDash();
 	}
-	else
-	{
-		// If no input, dash in the view's forward direction
-		DashDirection = FRotationMatrix(GetController()->GetControlRotation()).GetScaledAxis(EAxis::X);
-		DashDirection.Z = 0;
-		DashDirection.Normalize();
-	}
-	
-	// If the direction is somehow zero, use the character's forward vector
-	if (DashDirection.IsNearlyZero())
-	{
-		DashDirection = GetActorForwardVector();
-	}
-
-	// Apply the impulse
-	LaunchCharacter(DashDirection * DashStrength, true, true);
-
-	// Update the last dash timestamp
-	LastDashTime = World->GetTimeSeconds();
-}
-
-void AProject_GMCharacter::StartCrouch()
-{
-	// Get current ground speed
-	float GroundSpeed = GetVelocity().Size2D();
-
-	// Check if we are on the ground and moving fast enough to slide
-	if (GetCharacterMovement()->IsMovingOnGround() && GroundSpeed >= MinSlideSpeed)
-	{
-		bIsSliding = true;
-		GetCharacterMovement()->GroundFriction = SlideFriction;
-		
-		//	We must allow high speed while crouched
-		GetCharacterMovement()->MaxWalkSpeedCrouched = SprintSpeed; 
-		
-		Crouch();
-	}
-	else
-	{
-		// If not moving fast enough, just do a normal crouch
-		bIsSliding = false;
-		Crouch(); // Call base crouch
-	}
-}
-
-void AProject_GMCharacter::StopCrouch()
-{
-	// Stop sliding if we are
-	StopSlide();
-
-	// Call the base UnCrouch() function
-	UnCrouch();
 }
 
 void AProject_GMCharacter::StartSprint()
 {
+	// Only allow sprint if not currently crouching or sliding
 	if (!bIsCrouched && !bIsSliding)
 	{
 		GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
@@ -266,8 +169,38 @@ void AProject_GMCharacter::StartSprint()
 
 void AProject_GMCharacter::StopSprint()
 {
-	// Restore default walk speed
 	GetCharacterMovement()->MaxWalkSpeed = DefaultWalkSpeed;
+}
+
+void AProject_GMCharacter::StartCrouch()
+{
+	float GroundSpeed = GetVelocity().Size2D();
+
+	// Check if speed is sufficient to initiate a slide while on ground
+	if (GetCharacterMovement()->IsMovingOnGround() && GroundSpeed >= MinSlideSpeed)
+	{
+		bIsSliding = true;
+		
+		// Reduce friction to allow sliding
+		GetCharacterMovement()->GroundFriction = SlideFriction;
+		
+		// Allow high speed while crouched for the slide duration
+		GetCharacterMovement()->MaxWalkSpeedCrouched = SprintSpeed; 
+		
+		Crouch();
+	}
+	else
+	{
+		// Perform standard crouch
+		bIsSliding = false;
+		Crouch();
+	}
+}
+
+void AProject_GMCharacter::StopCrouch()
+{
+	StopSlide();
+	UnCrouch();
 }
 
 void AProject_GMCharacter::StopSlide()
@@ -275,9 +208,26 @@ void AProject_GMCharacter::StopSlide()
 	if (bIsSliding)
 	{
 		bIsSliding = false;
+		
+		// Restore default movement values
 		GetCharacterMovement()->GroundFriction = DefaultGroundFriction;
-
-		// Restore the default crouch speed
 		GetCharacterMovement()->MaxWalkSpeedCrouched = DefaultCrouchedWalkSpeed;
+	}
+}
+
+void AProject_GMCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// Monitor sliding state
+	if (bIsSliding)
+	{
+		float GroundSpeed = GetVelocity().Size2D();
+
+		// Stop sliding if speed drops too low or player is no longer grounded
+		if (GroundSpeed < MinSlideSpeed || !GetCharacterMovement()->IsMovingOnGround())
+		{
+			StopSlide();
+		}
 	}
 }
