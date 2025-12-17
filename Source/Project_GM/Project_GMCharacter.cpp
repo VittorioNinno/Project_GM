@@ -8,6 +8,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 
 // Include component headers to use their functionality
 #include "CharacterComponents/DashComponent.h"
@@ -61,6 +62,19 @@ AProject_GMCharacter::AProject_GMCharacter()
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName); 
 	FollowCamera->bUsePawnControlRotation = false; 
+}
+
+void AProject_GMCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// Cache default movement values to restore them later
+	if (GetCharacterMovement())
+	{
+		DefaultGroundFriction = GetCharacterMovement()->GroundFriction;
+		DefaultBrakingDeceleration = GetCharacterMovement()->BrakingDecelerationWalking;
+		DefaultMaxAcceleration = GetCharacterMovement()->MaxAcceleration;
+	}
 }
 
 void AProject_GMCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -230,4 +244,79 @@ void AProject_GMCharacter::Tick(float DeltaTime)
 			StopSlide();
 		}
 	}
+	
+	// Check surface type every frame
+	HandleGroundPhysics();
+}
+
+void AProject_GMCharacter::HandleGroundPhysics()
+{
+    // Safety Check
+    if (!GetCharacterMovement()) return;
+
+    // Surface Detection (Line Trace)
+    FVector Start = GetActorLocation();
+    FVector End = Start - FVector(0.0f, 0.0f, 150.0f); // Trace down
+
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(this);
+    QueryParams.bReturnPhysicalMaterial = true;
+
+    bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, QueryParams);
+    
+    bool bIsOnIce = false;
+
+    // Check Material Type
+    if (bHit && HitResult.PhysMaterial.IsValid())
+    {
+        // SurfaceType1 is "Ice" (Check Project Settings -> Physics)
+        if (HitResult.PhysMaterial->SurfaceType == EPhysicalSurface::SurfaceType1)
+        {
+            bIsOnIce = true;
+        }
+    }
+
+    // Apply Physics
+    if (bIsOnIce)
+    {
+        // --- ICE BEHAVIOR ---
+        
+        // Zero friction allows sliding without losing speed
+        GetCharacterMovement()->GroundFriction = 0.0f; 
+        
+        // Zero braking means the character won't try to stop automatically
+        GetCharacterMovement()->BrakingDecelerationWalking = 0.0f; 
+        
+        // Harder to change direction or start moving
+        GetCharacterMovement()->MaxAcceleration = IceMaxAcceleration; 
+        GetCharacterMovement()->RotationRate = FRotator(0.0f, 60.0f, 0.0f); // Slow rotation
+
+        // --- SLOPE GRAVITY LOGIC ---
+        FVector FloorNormal = HitResult.ImpactNormal;
+
+        // If the floor is NOT flat (Z < 1.0 means it has a slope)
+        if (FloorNormal.Z < 0.99f) 
+        {
+            // Get the direction pointing "Downhill"
+            FVector SlopeDir = FVector::VectorPlaneProject(FVector::DownVector, FloorNormal).GetSafeNormal();
+
+            // Calculate steepness factor (0 to 1)
+            float Steepness = 1.0f - FloorNormal.Z;
+
+            // Apply Force: Direction * Force * Steepness * Mass
+            // This ensures the character slides down even if standing still
+            FVector SlideForce = SlopeDir * IceSlopeGravityForce * Steepness * GetCharacterMovement()->Mass;
+            
+            GetCharacterMovement()->AddForce(SlideForce);
+        }
+    }
+    else
+    {
+        // --- NORMAL BEHAVIOR (Restore Defaults) ---
+        GetCharacterMovement()->GroundFriction = DefaultGroundFriction;
+        GetCharacterMovement()->BrakingDecelerationWalking = DefaultBrakingDeceleration;
+        GetCharacterMovement()->MaxAcceleration = DefaultMaxAcceleration;
+        GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f); // Fast rotation
+    }
 }

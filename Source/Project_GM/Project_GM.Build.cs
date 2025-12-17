@@ -18,26 +18,14 @@ public class Project_GM : ModuleRules
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"UMG",
-			"Slate"
+			"Slate",
+			"PhysicsCore"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
 
 		PublicIncludePaths.AddRange(new string[] {
-			"Project_GM",
-			"Project_GM/Variant_Platforming",
-			"Project_GM/Variant_Platforming/Animation",
-			"Project_GM/Variant_Combat",
-			"Project_GM/Variant_Combat/AI",
-			"Project_GM/Variant_Combat/Animation",
-			"Project_GM/Variant_Combat/Gameplay",
-			"Project_GM/Variant_Combat/Interfaces",
-			"Project_GM/Variant_Combat/UI",
-			"Project_GM/Variant_SideScrolling",
-			"Project_GM/Variant_SideScrolling/AI",
-			"Project_GM/Variant_SideScrolling/Gameplay",
-			"Project_GM/Variant_SideScrolling/Interfaces",
-			"Project_GM/Variant_SideScrolling/UI"
+			"Project_GM"
 		});
 
 		// Uncomment if you are using Slate UI

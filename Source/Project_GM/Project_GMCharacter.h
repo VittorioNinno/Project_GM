@@ -81,6 +81,8 @@ protected:
 protected:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	
+	virtual void BeginPlay() override;
+	
 	/** Called every frame */
 	virtual void Tick(float DeltaTime) override;
 
@@ -117,4 +119,28 @@ protected:
 
 	/** Helper function to stop the slide and reset physics */
 	void StopSlide();
+	
+	// --- Ice Physics Configuration ---
+    
+	// Friction level on ice (Lower = more slippery)
+	UPROPERTY(EditAnywhere, Category = "Movement|Ice")
+	float IceGroundFriction = 0.1f; 
+
+	// Deceleration when stopping on ice (Lower = sliding effect)
+	UPROPERTY(EditAnywhere, Category = "Movement|Ice")
+	float IceBrakingDeceleration = 100.0f; 
+
+	// Max acceleration on ice (Lower = harder to start moving)
+	UPROPERTY(EditAnywhere, Category = "Movement|Ice")
+	float IceMaxAcceleration = 400.0f; 
+	
+	UPROPERTY(EditAnywhere, Category = "Movement|Ice")
+	float IceSlopeGravityForce = 5000.0f;
+
+	// --- Variables to store default movement values ---
+	float DefaultBrakingDeceleration;
+	float DefaultMaxAcceleration;
+	
+	// Handles ground physics detection and applies movement changes
+	void HandleGroundPhysics();
 };
