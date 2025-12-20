@@ -77,18 +77,24 @@ protected:
 
 	/** Called for crouch input stop */
 	void StopCrouch();
+	
+	/** Helper function to stop the slide and reset physics */
+	void StopSlide();
+	
+	/* Handles ground physics detection and applies movement changes */
+	void HandleGroundPhysics();
 
 protected:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	
 	virtual void BeginPlay() override;
 	
-	/** Called every frame */
 	virtual void Tick(float DeltaTime) override;
 
 public:
 	/** Returns CameraBoom subobject **/
 	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
+	
 	/** Returns FollowCamera subobject **/
 	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 
@@ -116,21 +122,18 @@ protected:
 
 	/** True if the player is currently sliding */
 	bool bIsSliding;
-
-	/** Helper function to stop the slide and reset physics */
-	void StopSlide();
 	
-	// --- Ice Physics Configuration ---
+	// --- Ice Physics Variables ---
     
-	// Friction level on ice (Lower = more slippery)
+	/* Friction level on ice (Lower = more slippery) */
 	UPROPERTY(EditAnywhere, Category = "Movement|Ice")
 	float IceGroundFriction = 0.1f; 
 
-	// Deceleration when stopping on ice (Lower = sliding effect)
+	/* Deceleration when stopping on ice (Lower = sliding effect) */
 	UPROPERTY(EditAnywhere, Category = "Movement|Ice")
 	float IceBrakingDeceleration = 100.0f; 
 
-	// Max acceleration on ice (Lower = harder to start moving)
+	/* Max acceleration on ice (Lower = harder to start moving) */
 	UPROPERTY(EditAnywhere, Category = "Movement|Ice")
 	float IceMaxAcceleration = 400.0f; 
 	
@@ -141,6 +144,37 @@ protected:
 	float DefaultBrakingDeceleration;
 	float DefaultMaxAcceleration;
 	
-	// Handles ground physics detection and applies movement changes
-	void HandleGroundPhysics();
+	// --- Stamina Variables ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+	float MaxStamina = 100.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stats")
+	float CurrentStamina;
+
+	UPROPERTY(EditAnywhere, Category = "Stats")
+	float StaminaDrainRate = 25.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Stats")
+	float StaminaRegenRate = 10.0f;
+	
+	// --- UI / HUD ---
+	
+	/* Widget class to spawn for the HUD (Must be set in Blueprint) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
+	TSubclassOf<UUserWidget> HUDWidgetClass;
+
+	/* Pointer to the active HUD instance */
+	UPROPERTY()
+	UUserWidget* HUDWidgetInstance;
+	
+public:
+	/* Returns the current stamina percentage (0.0 to 1.0) for UI */
+	UFUNCTION(BlueprintCallable, Category = "Stats")
+	float GetStaminaPercent() const { return MaxStamina > 0 ? CurrentStamina / MaxStamina : 0.0f; }
+	
+	/* Called by ASuctionZone every tick to apply physics and logic */
+	void ApplySuctionForce(FVector SuctionOrigin, float Strength, float DeltaTime);
+	
+	/* Restores default physics values when leaving the zone */
+	void ResetSuctionPhysics();
 };

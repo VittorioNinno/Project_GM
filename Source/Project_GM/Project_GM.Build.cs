@@ -19,7 +19,8 @@ public class Project_GM : ModuleRules
 			"GameplayStateTreeModule",
 			"UMG",
 			"Slate",
-			"PhysicsCore"
+			"PhysicsCore",
+			"UMG"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

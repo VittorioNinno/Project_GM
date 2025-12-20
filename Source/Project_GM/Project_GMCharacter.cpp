@@ -9,8 +9,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
-
-// Include component headers to use their functionality
+#include "Blueprint/UserWidget.h"
 #include "CharacterComponents/DashComponent.h"
 #include "CharacterComponents/WallMechanicsComponent.h"
 
@@ -61,7 +60,7 @@ AProject_GMCharacter::AProject_GMCharacter()
 	// Create a follow camera
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName); 
-	FollowCamera->bUsePawnControlRotation = false; 
+	FollowCamera->bUsePawnControlRotation = false;
 }
 
 void AProject_GMCharacter::BeginPlay()
@@ -75,6 +74,40 @@ void AProject_GMCharacter::BeginPlay()
 		DefaultBrakingDeceleration = GetCharacterMovement()->BrakingDecelerationWalking;
 		DefaultMaxAcceleration = GetCharacterMovement()->MaxAcceleration;
 	}
+	
+	// Initialize stamina to max on spawn
+	CurrentStamina = MaxStamina;
+	
+	// --- UI INITIALIZATION ---
+	// Only create HUD for the local player
+	if (IsLocallyControlled() && HUDWidgetClass)
+	{
+		HUDWidgetInstance = CreateWidget<UUserWidget>(GetWorld(), HUDWidgetClass);
+		if (HUDWidgetInstance)
+		{
+			HUDWidgetInstance->AddToViewport();
+		}
+	}
+}
+
+void AProject_GMCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// Monitor sliding state
+	if (bIsSliding)
+	{
+		float GroundSpeed = GetVelocity().Size2D();
+
+		// Stop sliding if speed drops too low or player is no longer grounded
+		if (GroundSpeed < MinSlideSpeed || !GetCharacterMovement()->IsMovingOnGround())
+		{
+			StopSlide();
+		}
+	}
+	
+	// Check surface type every frame
+	HandleGroundPhysics();
 }
 
 void AProject_GMCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -229,26 +262,6 @@ void AProject_GMCharacter::StopSlide()
 	}
 }
 
-void AProject_GMCharacter::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
-
-	// Monitor sliding state
-	if (bIsSliding)
-	{
-		float GroundSpeed = GetVelocity().Size2D();
-
-		// Stop sliding if speed drops too low or player is no longer grounded
-		if (GroundSpeed < MinSlideSpeed || !GetCharacterMovement()->IsMovingOnGround())
-		{
-			StopSlide();
-		}
-	}
-	
-	// Check surface type every frame
-	HandleGroundPhysics();
-}
-
 void AProject_GMCharacter::HandleGroundPhysics()
 {
     // Safety Check
@@ -319,4 +332,95 @@ void AProject_GMCharacter::HandleGroundPhysics()
         GetCharacterMovement()->MaxAcceleration = DefaultMaxAcceleration;
         GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f); // Fast rotation
     }
+}
+
+void AProject_GMCharacter::ApplySuctionForce(FVector SuctionOrigin, float Strength, float DeltaTime)
+{
+	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+	if (!MoveComp) return;
+
+	FVector ActorLocation = GetActorLocation();
+	FVector ToHoleVector = (SuctionOrigin - ActorLocation);
+	FVector SuctionDir = ToHoleVector.GetSafeNormal();
+	
+	// 1. ALWAYS APPLY PHYSICS FORCE (For Jumping/Falling)
+	// This ensures that if they jump, they fly towards the hole immediately
+	FVector PullForce = SuctionDir * Strength * MoveComp->Mass;
+	MoveComp->AddForce(PullForce);
+
+	// 2. INPUT ANALYSIS
+	FVector InputDir = GetLastMovementInputVector();
+	float Alignment = 0.0f;
+	if (!InputDir.IsNearlyZero())
+	{
+		Alignment = FVector::DotProduct(InputDir, SuctionDir);
+	}
+
+	// --- LOGIC STATES ---
+
+	// CASE A: Moving TOWARDS the hole
+	if (Alignment > 0.5f) 
+	{
+		MoveComp->GroundFriction = 0.1f; 
+		MoveComp->BrakingDecelerationWalking = 0.0f; 
+		MoveComp->MaxWalkSpeed = 2000.f; // Terminal velocity
+	}
+	// CASE B: RESISTING (Trying to run away)
+	else if (Alignment < -0.2f) 
+	{
+		// ... (Stamina logic remains the same) ...
+		float DrainMultiplier = FMath::Abs(Alignment); 
+		float ActualDrain = StaminaDrainRate * DrainMultiplier * DeltaTime;
+		CurrentStamina = FMath::Clamp(CurrentStamina - ActualDrain, 0.0f, MaxStamina);
+
+		MoveComp->GroundFriction = 8.0f; // Needs grip to fight
+		MoveComp->BrakingDecelerationWalking = 2048.0f; 
+		MoveComp->MaxWalkSpeed = 350.f; // Struggle speed
+	}
+	// CASE C: IDLE / PASSIVE (Standing still)
+	else 
+	{
+		// --- FORCE DRAG FIX ---
+		
+		// 1. Eliminate all friction. Character becomes an ice cube.
+		MoveComp->GroundFriction = 0.0f; 
+		MoveComp->BrakingDecelerationWalking = 0.0f;
+		
+		// 2. The "Conveyor Belt" Trick:
+		// AddForce alone sometimes isn't enough to wake up the character from "Stop".
+		// We manually add a small input vector towards the hole.
+		// This tricks the system into thinking the player pushed the stick slightly.
+		// Value 0.3f ensures they slide but don't sprint.
+		if (InputDir.IsNearlyZero())
+		{
+			MoveComp->AddInputVector(SuctionDir * 0.3f);
+		}
+		
+		MoveComp->MaxWalkSpeed = 800.f; // Drag speed limit
+		
+		// Regen stamina slowly
+		CurrentStamina = FMath::Clamp(CurrentStamina + (StaminaRegenRate * DeltaTime), 0.0f, MaxStamina);
+	}
+
+	// 3. FAIL STATE (Game Over condition)
+	if (CurrentStamina <= 0.0f)
+	{
+		MoveComp->GroundFriction = 0.0f;
+		MoveComp->StopMovementImmediately();
+		
+		// Force full input into the hole
+		MoveComp->AddInputVector(SuctionDir * 1.0f, true); 
+	}
+}
+
+void AProject_GMCharacter::ResetSuctionPhysics()
+{
+	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+	if (MoveComp)
+	{
+		// Restore standard defaults
+		MoveComp->GroundFriction = 8.0f; 
+		MoveComp->BrakingDecelerationWalking = 2048.0f;		// Instant stop restored
+		MoveComp->MaxWalkSpeed = 600.0f; 
+	}
 }
