@@ -139,10 +139,51 @@ protected:
 	
 	UPROPERTY(EditAnywhere, Category = "Movement|Ice")
 	float IceSlopeGravityForce = 5000.0f;
+	
+	/* Rotation rate (Yaw) when moving on ice. Lower values make turning harder/slower. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement|Ice", meta = (ClampMin = "0.0", ClampMax = "1000.0"))
+	float IceRotationRate = 60.0f;
 
 	// --- Variables to store default movement values ---
 	float DefaultBrakingDeceleration;
 	float DefaultMaxAcceleration;
+	float DefaultRotationRate;
+	
+	/* Max walk speed when moving WITH the suction force (Running towards the hole) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Suction Physics")
+	float SuctionMoveSpeed_WithForce = 1000.0f;
+
+	/* Ground friction when moving WITH the suction force (Lower = more slippery) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Suction Physics")
+	float SuctionFriction_WithForce = 0.1f;
+
+	/* Max walk speed when resisting the suction force (Running away) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Suction Physics")
+	float SuctionMoveSpeed_AgainstForce = 450.0f;
+
+	/* Ground friction when resisting. High values provide grip, but too high causes stuck behavior. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Suction Physics")
+	float SuctionFriction_AgainstForce = 2.0f;
+
+	/* Braking deceleration when resisting. Lower values prevent stuttering movement against the force. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Suction Physics")
+	float SuctionBraking_AgainstForce = 100.0f;
+
+	/* Max speed when the player is idle and being dragged passively */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Suction Physics")
+	float SuctionMoveSpeed_Passive = 800.0f;
+
+	/* Magnitude of the fake input vector applied in idle to ensure physics simulation remains active */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Suction Physics")
+	float SuctionInputForce_Passive = 0.3f;
+
+	/* True if the character is currently inside a Suction Zone */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Suction State")
+	bool bIsUnderSuction = false;
+
+	/* The world location of the current suction source */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Suction State")
+	FVector SuctionTargetLocation;
 	
 	// --- Stamina Variables ---
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")

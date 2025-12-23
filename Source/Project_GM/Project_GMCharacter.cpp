@@ -75,6 +75,9 @@ void AProject_GMCharacter::BeginPlay()
 		DefaultMaxAcceleration = GetCharacterMovement()->MaxAcceleration;
 	}
 	
+	// Save the initial rotation rate set in the CharacterMovement Component
+	DefaultRotationRate = GetCharacterMovement()->RotationRate.Yaw;
+	
 	// Initialize stamina to max on spawn
 	CurrentStamina = MaxStamina;
 	
@@ -104,6 +107,54 @@ void AProject_GMCharacter::Tick(float DeltaTime)
 		{
 			StopSlide();
 		}
+	}
+	
+	if (GetCharacterMovement()->CurrentFloor.HitResult.PhysMaterial.IsValid())
+	{
+		// Otteniamo il tipo di superficie
+		EPhysicalSurface SurfaceType = GetCharacterMovement()->CurrentFloor.HitResult.PhysMaterial->SurfaceType;
+
+		if (SurfaceType == SurfaceType2) 
+		{
+			// Fisica Ghiaccio: Scivoloso, bassa accelerazione
+			GetCharacterMovement()->BrakingDecelerationWalking = 0.0f;
+			GetCharacterMovement()->MaxAcceleration = IceMaxAcceleration;
+			
+			// --- AGGIUNTA: Riduci velocità di rotazione su ghiaccio ---
+			GetCharacterMovement()->RotationRate.Yaw = IceRotationRate;
+            
+			// Logica gravità su pendenza ghiacciata (Codice che avevi nel file originale)
+			FHitResult FloorHit = GetCharacterMovement()->CurrentFloor.HitResult;
+			if (FloorHit.ImpactNormal.Z < 1.0f) 
+			{
+				FVector SlopeForce = FVector(FloorHit.ImpactNormal.X, FloorHit.ImpactNormal.Y, 0.0f);
+				GetCharacterMovement()->AddForce(SlopeForce * IceSlopeGravityForce * DeltaTime); 
+			}
+		}
+		else
+		{
+			// Ripristino fisica Normale (SOLO se non siamo sotto Risucchio)
+			// Se siamo sotto risucchio, è la SuctionZone a comandare questi valori.
+			if (!bIsUnderSuction) 
+			{
+				GetCharacterMovement()->BrakingDecelerationWalking = DefaultBrakingDeceleration; 
+				GetCharacterMovement()->MaxAcceleration = DefaultMaxAcceleration;
+				
+				// --- AGGIUNTA: Ripristina rotazione normale ---
+				GetCharacterMovement()->RotationRate.Yaw = DefaultRotationRate;
+			}
+		}
+	}
+	// Caso in cui saltiamo o siamo in aria (PhysMaterial non valido)
+	else if (!bIsUnderSuction)
+	{
+		// Assicuriamoci che la rotazione sia normale anche in aria/atterraggio
+		GetCharacterMovement()->RotationRate.Yaw = DefaultRotationRate;
+	}
+	
+	if (!bIsUnderSuction && CurrentStamina < MaxStamina)
+	{
+		CurrentStamina = FMath::Clamp(CurrentStamina + (StaminaRegenRate * DeltaTime), 0.0f, MaxStamina);
 	}
 	
 	// Check surface type every frame
@@ -294,33 +345,18 @@ void AProject_GMCharacter::HandleGroundPhysics()
     if (bIsOnIce)
     {
         // --- ICE BEHAVIOR ---
-        
-        // Zero friction allows sliding without losing speed
         GetCharacterMovement()->GroundFriction = 0.0f; 
-        
-        // Zero braking means the character won't try to stop automatically
         GetCharacterMovement()->BrakingDecelerationWalking = 0.0f; 
-        
-        // Harder to change direction or start moving
         GetCharacterMovement()->MaxAcceleration = IceMaxAcceleration; 
-        GetCharacterMovement()->RotationRate = FRotator(0.0f, 60.0f, 0.0f); // Slow rotation
+    	GetCharacterMovement()->RotationRate = FRotator(0.0f, IceRotationRate, 0.0f);
 
         // --- SLOPE GRAVITY LOGIC ---
         FVector FloorNormal = HitResult.ImpactNormal;
-
-        // If the floor is NOT flat (Z < 1.0 means it has a slope)
         if (FloorNormal.Z < 0.99f) 
         {
-            // Get the direction pointing "Downhill"
             FVector SlopeDir = FVector::VectorPlaneProject(FVector::DownVector, FloorNormal).GetSafeNormal();
-
-            // Calculate steepness factor (0 to 1)
             float Steepness = 1.0f - FloorNormal.Z;
-
-            // Apply Force: Direction * Force * Steepness * Mass
-            // This ensures the character slides down even if standing still
             FVector SlideForce = SlopeDir * IceSlopeGravityForce * Steepness * GetCharacterMovement()->Mass;
-            
             GetCharacterMovement()->AddForce(SlideForce);
         }
     }
@@ -330,7 +366,7 @@ void AProject_GMCharacter::HandleGroundPhysics()
         GetCharacterMovement()->GroundFriction = DefaultGroundFriction;
         GetCharacterMovement()->BrakingDecelerationWalking = DefaultBrakingDeceleration;
         GetCharacterMovement()->MaxAcceleration = DefaultMaxAcceleration;
-        GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f); // Fast rotation
+    	GetCharacterMovement()->RotationRate = FRotator(0.0f, DefaultRotationRate, 0.0f);
     }
 }
 
@@ -339,88 +375,81 @@ void AProject_GMCharacter::ApplySuctionForce(FVector SuctionOrigin, float Streng
 	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
 	if (!MoveComp) return;
 
+	// Update State
+	bIsUnderSuction = true;
+	SuctionTargetLocation = SuctionOrigin;
+
 	FVector ActorLocation = GetActorLocation();
 	FVector ToHoleVector = (SuctionOrigin - ActorLocation);
 	FVector SuctionDir = ToHoleVector.GetSafeNormal();
-	
-	// 1. ALWAYS APPLY PHYSICS FORCE (For Jumping/Falling)
-	// This ensures that if they jump, they fly towards the hole immediately
 	FVector PullForce = SuctionDir * Strength * MoveComp->Mass;
 	MoveComp->AddForce(PullForce);
 
-	// 2. INPUT ANALYSIS
+	// Fail state: Exhaustion
+	if (CurrentStamina <= 0.0f)
+	{
+		MoveComp->GroundFriction = 0.0f; 
+		MoveComp->BrakingDecelerationWalking = 0.0f;
+		MoveComp->MaxWalkSpeed = 0.0f;
+		
+		MoveComp->AddInputVector(SuctionDir * 0.1f);
+		return; 
+	}
+
+	// Input Analysis
 	FVector InputDir = GetLastMovementInputVector();
 	float Alignment = 0.0f;
 	if (!InputDir.IsNearlyZero())
 	{
 		Alignment = FVector::DotProduct(InputDir, SuctionDir);
 	}
-
-	// --- LOGIC STATES ---
-
-	// CASE A: Moving TOWARDS the hole
+	
+	// Moving towards the force
 	if (Alignment > 0.5f) 
 	{
-		MoveComp->GroundFriction = 0.1f; 
+		MoveComp->GroundFriction = SuctionFriction_WithForce; 
 		MoveComp->BrakingDecelerationWalking = 0.0f; 
-		MoveComp->MaxWalkSpeed = 2000.f; // Terminal velocity
+		MoveComp->MaxWalkSpeed = SuctionMoveSpeed_WithForce; 
+
+		// Regen Stamina
+		CurrentStamina = FMath::Clamp(CurrentStamina + (StaminaRegenRate * DeltaTime), 0.0f, MaxStamina);
 	}
-	// CASE B: RESISTING (Trying to run away)
+	// Resisting (moving against the force)
 	else if (Alignment < -0.2f) 
 	{
-		// ... (Stamina logic remains the same) ...
+		// Consume Stamina
 		float DrainMultiplier = FMath::Abs(Alignment); 
 		float ActualDrain = StaminaDrainRate * DrainMultiplier * DeltaTime;
 		CurrentStamina = FMath::Clamp(CurrentStamina - ActualDrain, 0.0f, MaxStamina);
 
-		MoveComp->GroundFriction = 8.0f; // Needs grip to fight
-		MoveComp->BrakingDecelerationWalking = 2048.0f; 
-		MoveComp->MaxWalkSpeed = 350.f; // Struggle speed
+		MoveComp->GroundFriction = SuctionFriction_AgainstForce; 
+		MoveComp->BrakingDecelerationWalking = SuctionBraking_AgainstForce; 
+		MoveComp->MaxWalkSpeed = SuctionMoveSpeed_AgainstForce; 
 	}
-	// CASE C: IDLE / PASSIVE (Standing still)
+	// Idle / Passive
 	else 
 	{
-		// --- FORCE DRAG FIX ---
-		
-		// 1. Eliminate all friction. Character becomes an ice cube.
 		MoveComp->GroundFriction = 0.0f; 
 		MoveComp->BrakingDecelerationWalking = 0.0f;
-		
-		// 2. The "Conveyor Belt" Trick:
-		// AddForce alone sometimes isn't enough to wake up the character from "Stop".
-		// We manually add a small input vector towards the hole.
-		// This tricks the system into thinking the player pushed the stick slightly.
-		// Value 0.3f ensures they slide but don't sprint.
+       
 		if (InputDir.IsNearlyZero())
 		{
-			MoveComp->AddInputVector(SuctionDir * 0.3f);
+			MoveComp->AddInputVector(SuctionDir * SuctionInputForce_Passive);
 		}
-		
-		MoveComp->MaxWalkSpeed = 800.f; // Drag speed limit
-		
-		// Regen stamina slowly
+       
+		MoveComp->MaxWalkSpeed = SuctionMoveSpeed_Passive; 
+       
+		// Regen Stamina
 		CurrentStamina = FMath::Clamp(CurrentStamina + (StaminaRegenRate * DeltaTime), 0.0f, MaxStamina);
-	}
-
-	// 3. FAIL STATE (Game Over condition)
-	if (CurrentStamina <= 0.0f)
-	{
-		MoveComp->GroundFriction = 0.0f;
-		MoveComp->StopMovementImmediately();
-		
-		// Force full input into the hole
-		MoveComp->AddInputVector(SuctionDir * 1.0f, true); 
 	}
 }
 
 void AProject_GMCharacter::ResetSuctionPhysics()
 {
-	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
-	if (MoveComp)
-	{
-		// Restore standard defaults
-		MoveComp->GroundFriction = 8.0f; 
-		MoveComp->BrakingDecelerationWalking = 2048.0f;		// Instant stop restored
-		MoveComp->MaxWalkSpeed = 600.0f; 
-	}
+	bIsUnderSuction = false;
+
+	// Reset movement params to defaults
+	GetCharacterMovement()->GroundFriction = 8.0f; 
+	GetCharacterMovement()->BrakingDecelerationWalking = 2048.0f;
+	GetCharacterMovement()->MaxWalkSpeed = 600.0f;
 }
