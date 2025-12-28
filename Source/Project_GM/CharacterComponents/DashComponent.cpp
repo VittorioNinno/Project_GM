@@ -1,63 +1,80 @@
 ﻿#include "DashComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "StuntInteractable.h"
 
 UDashComponent::UDashComponent()
 {
-	// Disable tick as this component only reacts to events
-	PrimaryComponentTick.bCanEverTick = false;
-	
-	// Initialize with a value that allows immediate usage
+	PrimaryComponentTick.bCanEverTick = true;
 	LastDashTime = -DashCooldown;
+	bIsCurrentlyDashing = false;
+}
+
+void UDashComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	if (bIsCurrentlyDashing)
+	{
+		DetectEnvironmentalInteractions();
+	}
 }
 
 bool UDashComponent::PerformDash()
 {
 	ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner());
-	
-	// Validate owner and movement component existence
-	if (!OwnerCharacter || !OwnerCharacter->GetCharacterMovement())
-	{
-		return false;
-	}
+	if (!OwnerCharacter || !OwnerCharacter->GetCharacterMovement()) return false;
 
-	// Prevent dashing while on the ground to ensure the input key can be shared with Sprint when on ground
-	if (OwnerCharacter->GetCharacterMovement()->IsMovingOnGround())
-	{
-		return false;
-	}
+	if (OwnerCharacter->GetCharacterMovement()->IsMovingOnGround()) return false;
 
 	UWorld* World = GetWorld();
-	
-	// Check if the ability is on cooldown
-	if (World == nullptr || World->GetTimeSeconds() < LastDashTime + DashCooldown)
-	{
-		return false;
-	}
+	if (World == nullptr || World->GetTimeSeconds() < LastDashTime + DashCooldown) return false;
 
-	// Calculate dash direction based on input or character orientation
 	FVector DashDirection;
-	
-	// GetCurrentAcceleration returns the requested movement direction from input (WASD / Stick)
 	FVector InputAcceleration = OwnerCharacter->GetCharacterMovement()->GetCurrentAcceleration().GetSafeNormal();
+	DashDirection = !InputAcceleration.IsNearlyZero() ? InputAcceleration : OwnerCharacter->GetActorForwardVector();
 
-	if (!InputAcceleration.IsNearlyZero())
-	{
-		// If the player is pressing a direction, dash towards that input
-		DashDirection = InputAcceleration;
-	}
-	else
-	{
-		// If there is no input, dash in the direction the character mesh is currently facing
-		// This is required for fixed-camera setups where ControlRotation does not match character facing
-		DashDirection = OwnerCharacter->GetActorForwardVector();
-	}
-
-	// Ensure Z velocity is overridden to provide a consistent impulse (Air Dash)
 	OwnerCharacter->LaunchCharacter(DashDirection * DashStrength, true, true);
-
-	// Update cooldown timestamp
+	
 	LastDashTime = World->GetTimeSeconds();
+	bIsCurrentlyDashing = true;
+
+	World->GetTimerManager().SetTimer(InteractionTimerHandle, this, &UDashComponent::StopDashInteraction, 0.2f, false);
 
 	return true;
+}
+
+void UDashComponent::DetectEnvironmentalInteractions()
+{
+	AActor* Owner = GetOwner();
+	if (!Owner || !GetWorld()) return;
+
+	FVector TraceLocation = Owner->GetActorLocation();
+	TArray<FHitResult> HitResults;
+	FCollisionQueryParams Params;
+	Params.AddIgnoredActor(Owner);
+
+	bool bHit = GetWorld()->SweepMultiByChannel(
+		HitResults, TraceLocation, TraceLocation, FQuat::Identity, 
+		ECC_WorldDynamic, FCollisionShape::MakeSphere(DetectionRadius), Params
+	);
+
+	if (bHit)
+	{
+		for (const FHitResult& Hit : HitResults)
+		{
+			AActor* HitActor = Hit.GetActor();
+			if (HitActor && HitActor->GetClass()->ImplementsInterface(UStuntInteractable::StaticClass()))
+			{
+				IStuntInteractable::Execute_OnStuntImpact(HitActor, Owner, FName("Dash"));
+			}
+		}
+	}
+}
+
+void UDashComponent::StopDashInteraction()
+{
+	bIsCurrentlyDashing = false;
 }

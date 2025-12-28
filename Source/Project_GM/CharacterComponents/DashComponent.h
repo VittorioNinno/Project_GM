@@ -2,12 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "StuntInteractable.h"
 #include "DashComponent.generated.h"
 
-/**
- * Component responsible for handling the Dash ability.
- * Designed to be attached to a Character to grant dashing capabilities.
- */
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
 class PROJECT_GM_API UDashComponent : public UActorComponent
 {
@@ -16,22 +13,31 @@ class PROJECT_GM_API UDashComponent : public UActorComponent
 public:	
 	UDashComponent();
 
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+	/** Attempts to perform the dash logic. Returns true if executed successfully. */
+	UFUNCTION(BlueprintCallable, Category = "Ability|Dash")
+	bool PerformDash();
+
 protected:
-	/** The strength of the dash impulse */
-	UPROPERTY(EditAnywhere, Category="Ability|Dash")
+	UPROPERTY(EditAnywhere, Category = "Ability|Dash")
 	float DashStrength = 2000.f;
 
-	/** Cooldown time in seconds between dashes */
-	UPROPERTY(EditAnywhere, Category="Ability|Dash")
+	UPROPERTY(EditAnywhere, Category = "Ability|Dash")
 	float DashCooldown = 1.0f;
 
-	/** Timestamp of the last successful dash used for cooldown calculation */
-	float LastDashTime;
+	/** Radius used to detect interactable environmental objects while dashing */
+	UPROPERTY(EditAnywhere, Category = "Ability|Dash")
+	float DetectionRadius = 150.0f;
 
-public:
-	/** 
-	 * Attempts to perform the dash logic.
-	 * Returns true if the dash was executed successfully.
-	 */
-	bool PerformDash();
+private:
+	/** Checks for actors implementing IStuntInteractable in character's vicinity */
+	void DetectEnvironmentalInteractions();
+
+	/** Stops the active interaction detection window */
+	void StopDashInteraction();
+
+	float LastDashTime;
+	bool bIsCurrentlyDashing;
+	FTimerHandle InteractionTimerHandle;
 };

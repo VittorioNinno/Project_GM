@@ -16,7 +16,7 @@ protected:
 	virtual void BeginPlay() override;
 
 	UPROPERTY(EditAnywhere, Category="Wall Jump")
-	float WallJumpHorizontalForce = 200.f; // Increased default for parabolic arc
+	float WallJumpHorizontalForce = 200.f;
 
 	UPROPERTY(EditAnywhere, Category="Wall Jump")
 	float WallJumpUpForce = 200.f;
@@ -24,10 +24,9 @@ protected:
 	UPROPERTY(EditAnywhere, Category="Wall Jump")
 	float WallJumpAirControlLockout = 0.4f;
 
-	bool DetectWall(FVector& OutWallNormal);
+	bool DetectWall(FVector& OutWallNormal, AActor*& OutHitActor);
 	void ResetAirControl();
 
-	// Function called when the character hits the ground
 	UFUNCTION()
 	void OnLanded(const FHitResult& Hit);
 
