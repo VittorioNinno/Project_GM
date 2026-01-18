@@ -9,6 +9,7 @@
 #include "CharacterComponents/DashComponent.h"
 #include "CharacterComponents/WallMechanicsComponent.h"
 #include "CharacterComponents/StaminaComponent.h"
+#include "CharacterComponents/FlyComponent.h"
 #include "DrawDebugHelpers.h"
 
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
@@ -18,19 +19,18 @@ AProject_GMCharacter::AProject_GMCharacter()
 	PrimaryActorTick.bCanEverTick = true;
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
 
+	MovementComponent = GetCharacterMovement();
+	
 	/** RESTORE BASE MOVEMENT: Ensure character rotates to movement, not camera */
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
-
-	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-	{
-		MoveComp->bOrientRotationToMovement = true; 
-		MoveComp->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
-		MoveComp->NavAgentProps.bCanCrouch = true;
-		MoveComp->JumpZVelocity = 500.f;
-		MoveComp->AirControl = 0.35f;
-	}
+	
+	MovementComponent->bOrientRotationToMovement = true; 
+	MovementComponent->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
+	MovementComponent->NavAgentProps.bCanCrouch = true;
+	MovementComponent->JumpZVelocity = 500.f;
+	MovementComponent->AirControl = 0.35f;
 
 	JumpMaxCount = 2;
 
@@ -46,22 +46,22 @@ AProject_GMCharacter::AProject_GMCharacter()
 	DashComponent = CreateDefaultSubobject<UDashComponent>(TEXT("DashComponent"));
 	WallMechanicsComponent = CreateDefaultSubobject<UWallMechanicsComponent>(TEXT("WallMechanicsComponent"));
 	StaminaComponent = CreateDefaultSubobject<UStaminaComponent>(TEXT("StaminaComponent"));
+	FlyComponent = CreateDefaultSubobject<UFlyComponent>(TEXT("FlyComponent"));
+	
 }
 
 void AProject_GMCharacter::BeginPlay()
 {
 	Super::BeginPlay();
-
+	
 	/** Capture the default values set in Blueprint at start */
-	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-	{
-		DefaultGroundFriction = MoveComp->GroundFriction;
-		DefaultBrakingDeceleration = MoveComp->BrakingDecelerationWalking;
-		DefaultMaxWalkSpeed = MoveComp->MaxWalkSpeed;
-		DefaultMaxAcceleration = MoveComp->MaxAcceleration;
-		DefaultRotationRate = MoveComp->RotationRate.Yaw;
-		DefaultCrouchedWalkSpeed = MoveComp->MaxWalkSpeedCrouched;
-	}
+	
+	DefaultGroundFriction = MovementComponent->GroundFriction;
+	DefaultBrakingDeceleration = MovementComponent->BrakingDecelerationWalking;
+	DefaultMaxWalkSpeed = MovementComponent->MaxWalkSpeed;
+	DefaultMaxAcceleration = MovementComponent->MaxAcceleration;
+	DefaultRotationRate = MovementComponent->RotationRate.Yaw;
+	DefaultCrouchedWalkSpeed = MovementComponent->MaxWalkSpeedCrouched;
 
 	if (IsLocallyControlled() && HUDWidgetClass)
 	{
@@ -70,39 +70,48 @@ void AProject_GMCharacter::BeginPlay()
 	}
 }
 
+void AProject_GMCharacter::HandleFlyPhysics() const
+{
+	MovementComponent->AddImpulse(FlyComponent->GetFlyingUpDirection(Controller) * FlyComponent->CalculateFinalFlyForce());
+}
+
 void AProject_GMCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
 	DisplaySurfaceDebugInfo();
+	
 	HandleGroundPhysics(DeltaTime);
-
+	
 	if (bIsSliding)
 	{
-		if (GetVelocity().Size2D() < MinSlideSpeed || !GetCharacterMovement()->IsMovingOnGround())
+		if (GetVelocity().Size2D() < MinSlideSpeed || !MovementComponent->IsMovingOnGround())
 		{
 			StopCrouch();
 		}
 	}
+	
+	HandleFlyPhysics();
 }
+
+
 
 void AProject_GMCharacter::HandleGroundPhysics(float DeltaTime)
 {
-	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
-	if (!MoveComp || !StaminaComponent) return;
+	if (!MovementComponent || !StaminaComponent) return;
 
 	/** 1. SUCTION ZONE OVERRIDE */
 	if (bIsUnderSuction)
 	{
 		FVector CharacterLoc = GetActorLocation();
 		FVector SuctionDir = (SuctionTargetLocation - CharacterLoc).GetSafeNormal();
-		MoveComp->AddForce(SuctionDir * CurrentSuctionStrength * MoveComp->Mass);
+		MovementComponent->AddForce(SuctionDir * CurrentSuctionStrength * MovementComponent->Mass);
 
 		if (StaminaComponent->GetStaminaPercentage() <= 0.0f)
 		{
-			MoveComp->GroundFriction = 0.0f; 
-			MoveComp->MaxWalkSpeed = 0.0f;
-			MoveComp->AddInputVector(SuctionDir * 0.1f);
+			MovementComponent->GroundFriction = 0.0f; 
+			MovementComponent->MaxWalkSpeed = 0.0f;
+			MovementComponent->AddInputVector(SuctionDir * 0.1f);
 			return;
 		}
 
@@ -111,9 +120,9 @@ void AProject_GMCharacter::HandleGroundPhysics(float DeltaTime)
 
 		if (Alignment > 0.2f)
 		{
-			MoveComp->GroundFriction = 8.0f; 
-			MoveComp->BrakingDecelerationWalking = 0.0f; 
-			MoveComp->MaxWalkSpeed = 1200.0f;
+			MovementComponent->GroundFriction = 8.0f; 
+			MovementComponent->BrakingDecelerationWalking = 0.0f; 
+			MovementComponent->MaxWalkSpeed = 1200.0f;
 			StaminaComponent->SetIsRegenerating(true);
 		}
 		else if (Alignment < -0.2f)
@@ -121,14 +130,14 @@ void AProject_GMCharacter::HandleGroundPhysics(float DeltaTime)
 			StaminaComponent->SetIsRegenerating(false);
 			StaminaComponent->ModifyStamina(-25.0f * FMath::Abs(Alignment) * DeltaTime);
 
-			MoveComp->GroundFriction = 12.0f;
-			MoveComp->MaxWalkSpeed = 300.0f;
+			MovementComponent->GroundFriction = 12.0f;
+			MovementComponent->MaxWalkSpeed = 300.0f;
 		}
 		else
 		{
-			MoveComp->GroundFriction = 0.0f;
-			if (InputDir.IsNearlyZero()) MoveComp->AddInputVector(SuctionDir * 0.5f);
-			MoveComp->MaxWalkSpeed = 600.0f;
+			MovementComponent->GroundFriction = 0.0f;
+			if (InputDir.IsNearlyZero()) MovementComponent->AddInputVector(SuctionDir * 0.5f);
+			MovementComponent->MaxWalkSpeed = 600.0f;
 			StaminaComponent->SetIsRegenerating(true);
 		}
 		return;
@@ -155,26 +164,26 @@ void AProject_GMCharacter::HandleGroundPhysics(float DeltaTime)
 
 	if (bIsOnIce)
 	{
-		MoveComp->GroundFriction = 0.0f; 
-		MoveComp->BrakingDecelerationWalking = 0.0f; 
-		MoveComp->MaxAcceleration = IceMaxAcceleration; 
-		MoveComp->RotationRate = FRotator(0.0f, IceRotationRate, 0.0f);
+		MovementComponent->GroundFriction = 0.0f; 
+		MovementComponent->BrakingDecelerationWalking = 0.0f; 
+		MovementComponent->MaxAcceleration = IceMaxAcceleration; 
+		MovementComponent->RotationRate = FRotator(0.0f, IceRotationRate, 0.0f);
 
 		/** Slope Gravity Logic based on your original code */
 		FVector FloorNormal = HitResult.ImpactNormal;
 		if (FloorNormal.Z < 0.99f) 
 		{
 			FVector SlopeForce = FVector(FloorNormal.X, FloorNormal.Y, 0.0f);
-			MoveComp->AddForce(SlopeForce * IceSlopeGravityForce * DeltaTime);
+			MovementComponent->AddForce(SlopeForce * IceSlopeGravityForce * DeltaTime);
 		}
 	}
 	else
 	{
 		/** 3. RESTORE DEFAULT MOVEMENT PROPERTIES */
-		MoveComp->GroundFriction = DefaultGroundFriction;
-		MoveComp->BrakingDecelerationWalking = DefaultBrakingDeceleration;
-		MoveComp->MaxAcceleration = DefaultMaxAcceleration;
-		MoveComp->RotationRate = FRotator(0.0f, DefaultRotationRate, 0.0f);
+		MovementComponent->GroundFriction = DefaultGroundFriction;
+		MovementComponent->BrakingDecelerationWalking = DefaultBrakingDeceleration;
+		MovementComponent->MaxAcceleration = DefaultMaxAcceleration;
+		MovementComponent->RotationRate = FRotator(0.0f, DefaultRotationRate, 0.0f);
 		StaminaComponent->SetIsRegenerating(true);
 	}
 }
@@ -214,6 +223,8 @@ void AProject_GMCharacter::ResetSuctionPhysics()
 /** Original Ability Handlers */
 void AProject_GMCharacter::DoJumpStart()
 {
+	if (GetCharacterMovement()->MovementMode== MOVE_Flying) return;
+	
 	if (WallMechanicsComponent && WallMechanicsComponent->AttemptWallJump())
 	{
 		JumpCurrentCount = 0;
@@ -222,12 +233,25 @@ void AProject_GMCharacter::DoJumpStart()
 	Jump();
 }
 
-void AProject_GMCharacter::OnDashAction() { if (DashComponent) DashComponent->PerformDash(); }
-void AProject_GMCharacter::StartSprint() { if (!bIsCrouched && !bIsSliding) GetCharacterMovement()->MaxWalkSpeed = SprintSpeed; }
-void AProject_GMCharacter::StopSprint() { GetCharacterMovement()->MaxWalkSpeed = DefaultMaxWalkSpeed; }
+void AProject_GMCharacter::OnDashAction()
+{
+	if (GetCharacterMovement()->MovementMode== MOVE_Flying) return;
+	
+	if (DashComponent) DashComponent->PerformDash();
+}
+void AProject_GMCharacter::StartSprint()
+{
+	if (!bIsCrouched && !bIsSliding) GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
+}
+void AProject_GMCharacter::StopSprint()
+{
+	GetCharacterMovement()->MaxWalkSpeed = DefaultMaxWalkSpeed;
+}
 
 void AProject_GMCharacter::StartCrouch()
 {
+	if (GetCharacterMovement()->MovementMode== MOVE_Flying) return;
+	
 	if (GetCharacterMovement()->IsMovingOnGround() && GetVelocity().Size2D() >= MinSlideSpeed)
 	{
 		bIsSliding = true;
@@ -239,6 +263,8 @@ void AProject_GMCharacter::StartCrouch()
 
 void AProject_GMCharacter::StopCrouch()
 {
+	if (GetCharacterMovement()->MovementMode== MOVE_Flying) return;
+	
 	bIsSliding = false;
 	GetCharacterMovement()->GroundFriction = DefaultGroundFriction;
 	GetCharacterMovement()->MaxWalkSpeedCrouched = DefaultCrouchedWalkSpeed;
@@ -277,5 +303,7 @@ void AProject_GMCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 		EIC->BindAction(SprintAction, ETriggerEvent::Completed, this, &AProject_GMCharacter::StopSprint);
 		EIC->BindAction(CrouchAction, ETriggerEvent::Started, this, &AProject_GMCharacter::StartCrouch);
 		EIC->BindAction(CrouchAction, ETriggerEvent::Completed, this, &AProject_GMCharacter::StopCrouch);
+		
+		FlyComponent->SetInput(EIC);
 	}
 }

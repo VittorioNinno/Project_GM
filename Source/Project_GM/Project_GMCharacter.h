@@ -10,6 +10,7 @@ class UCameraComponent;
 class UDashComponent;
 class UWallMechanicsComponent;
 class UStaminaComponent;
+class UFlyComponent;
 class UInputAction;
 class UUserWidget;
 struct FInputActionValue;
@@ -40,6 +41,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UStaminaComponent* StaminaComponent;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UFlyComponent* FlyComponent;
 
 	/** UI */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
@@ -77,7 +81,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Suction State")
 	float CurrentSuctionStrength = 0.0f;
-
+	
+	
+	
 	/** Internal State Flags */
 	bool bIsSliding = false;
 
@@ -89,18 +95,20 @@ private:
 	float DefaultMaxAcceleration;
 	float DefaultRotationRate;
 	float DefaultCrouchedWalkSpeed;
+	UPROPERTY();
+	UCharacterMovementComponent* MovementComponent;
 
 public:
 	/** Interfaces */
 	void ApplySuctionForce(FVector TargetLocation, float Strength, float DeltaTime);
 	void ResetSuctionPhysics();
-
 	UFUNCTION(BlueprintPure, Category = "Stats")
 	float GetStaminaPercentage() const;
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
+	
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 	/** Movement and Logic Handlers */
@@ -116,6 +124,8 @@ protected:
 	/** Main physics processing using Line Trace */
 	void HandleGroundPhysics(float DeltaTime);
 
+	void HandleFlyPhysics() const;
+	
 	/** Debug Section */
 	void DisplaySurfaceDebugInfo();
 
