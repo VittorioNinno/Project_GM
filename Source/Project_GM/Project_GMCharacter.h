@@ -13,6 +13,7 @@ class UStaminaComponent;
 class UFlyComponent;
 class UInputAction;
 class UUserWidget;
+class UHealthComponent;
 struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
@@ -44,12 +45,15 @@ protected:
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UFlyComponent* FlyComponent;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UHealthComponent* HealthComponent;
 
 	/** UI */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
 	TSubclassOf<UUserWidget> HUDWidgetClass;
 
-	UPROPERTY()
+	UPROPERTY(BlueprintReadOnly)
 	UUserWidget* HUDWidgetInstance;
 
 	/** --- MOVEMENT SETTINGS --- */

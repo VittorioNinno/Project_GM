@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/BoxComponent.h"
 #include "GameFramework/Actor.h"
 #include "ElectrifiedZone.generated.h"
 
@@ -18,7 +17,7 @@ public:
 	float Effect_Time_Duration = 2;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Zone")
 	float Time_Before_Starting_Effect_Again = 4;
-	
+
 	// Sets default values for this actor's properties
 	AElectrifiedZone();
 
@@ -28,11 +27,9 @@ protected:
 	float current_Time_Before_Starting_Effect_Again;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
-	TObjectPtr<ACharacter> OverlappedCharacter; 
-	
-	UFUNCTION()
-	static void ApplyElectrifiedEffect(ACharacter* Character);
-	UFUNCTION()
+	TObjectPtr<ACharacter> OverlappedCharacter;
+
+	static void ApplyElectrifiedEffect(ACharacter* Character, float duration);
 	static void RemovedElectrifiedEffect(ACharacter* Character);
 	UFUNCTION()
 	void OnBoxBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);

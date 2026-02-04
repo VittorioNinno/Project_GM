@@ -3,8 +3,8 @@
 
 #include "ElectrifiedZone.h"
 
-#include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Effects/ElectricEffect.h"
 #include "GameFramework/Character.h"
 
 // Sets default values
@@ -51,7 +51,7 @@ void AElectrifiedZone::Tick(float DeltaTime)
 	if (current_Time_Before_Starting_Effect_Again >= Effect_Time_Duration + Time_Before_Starting_Effect_Again)
 	{
 		current_Time_Before_Starting_Effect_Again = 0;
-		ApplyElectrifiedEffect(OverlappedCharacter);
+		ApplyElectrifiedEffect(OverlappedCharacter, Effect_Time_Duration);
 	}
 }
 
@@ -59,36 +59,55 @@ void AElectrifiedZone::OnBoxBeginOverlap(UPrimitiveComponent* OverlappedComponen
 {
 	if (!OtherActor || OtherActor == this) return;
 	
-	GEngine->AddOnScreenDebugMessage(-1, 5, FColor::Green, TEXT("Electrified Zon Begin Overlap"));
+	GEngine->AddOnScreenDebugMessage(-1, 5, FColor::Green, TEXT("Electrified Zone Begin Overlap"));
 	OverlappedCharacter = Cast<ACharacter>(OtherActor);
-	ApplyElectrifiedEffect(OverlappedCharacter);
+	ApplyElectrifiedEffect(OverlappedCharacter, Effect_Time_Duration);
 }
 
 void AElectrifiedZone::OnBoxEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
 	if (!OtherActor || OtherActor == this) return;
 	
-	GEngine->AddOnScreenDebugMessage(-1, 5, FColor::Green, TEXT("Electrified Zon End Overlap"));
+	GEngine->AddOnScreenDebugMessage(-1, 5, FColor::Green, TEXT("Electrified Zone End Overlap"));
 	OverlappedCharacter = nullptr;
 	current_Effect_Time = 0;
 	current_Time_Before_Starting_Effect_Again = 0;
 }
 
-void AElectrifiedZone::ApplyElectrifiedEffect(ACharacter* Character)
+void AElectrifiedZone::ApplyElectrifiedEffect(ACharacter* Character, float duration)
 {
-	APlayerController* PlayerController = Cast<APlayerController>(Character->GetController());
-	Character->DisableInput(PlayerController);
-	GEngine->AddOnScreenDebugMessage(-1, 5, FColor::Yellow, TEXT("Applied Electrified Force"));
+	if (!Character) return;
+	
+	UElectricEffect* ExistingComp = Character->FindComponentByClass<UElectricEffect>();
+
+	if (ExistingComp)
+	{
+		ExistingComp->RefreshDuration(duration);
+	}
+	else
+	{
+		UElectricEffect* NewComp = NewObject<UElectricEffect>(Character, UElectricEffect::StaticClass());
+		if (NewComp)
+		{
+			NewComp->InitializeEffect(duration);
+			
+#if WITH_EDITOR
+			Character->AddInstanceComponent(NewComp);
+#endif
+			
+			NewComp->RegisterComponent();
+		}
+	}
+	GEngine->AddOnScreenDebugMessage(-1, 5, FColor::Green, TEXT("Zone Applied Electricity Effect"));
 }
 
 void AElectrifiedZone::RemovedElectrifiedEffect(ACharacter* Character)
 {
-	APlayerController* PlayerController = Cast<APlayerController>(Character->GetController());
-	Character->EnableInput(PlayerController);
-	GEngine->AddOnScreenDebugMessage(-1, 5, FColor::Yellow, TEXT("Removed Electrified Force"));
+	UElectricEffect* ExistingComp = Character->FindComponentByClass<UElectricEffect>();
+	if (!ExistingComp) return;
+	ExistingComp->DestroyComponent();
+	GEngine->AddOnScreenDebugMessage(-1, 5, FColor::Green, TEXT("Removed Electrified Effect"));
 }
-
-
 
 
 

@@ -11,6 +11,8 @@
 #include "CharacterComponents/StaminaComponent.h"
 #include "CharacterComponents/FlyComponent.h"
 #include "DrawDebugHelpers.h"
+#include "CharacterComponents/HealthComponent.h"
+#include "Components/ProgressBar.h"
 
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 
@@ -47,12 +49,13 @@ AProject_GMCharacter::AProject_GMCharacter()
 	WallMechanicsComponent = CreateDefaultSubobject<UWallMechanicsComponent>(TEXT("WallMechanicsComponent"));
 	StaminaComponent = CreateDefaultSubobject<UStaminaComponent>(TEXT("StaminaComponent"));
 	FlyComponent = CreateDefaultSubobject<UFlyComponent>(TEXT("FlyComponent"));
+	HealthComponent = CreateDefaultSubobject<UHealthComponent>(TEXT("HealthComponent"));
+	
 	
 }
 
 void AProject_GMCharacter::BeginPlay()
 {
-	Super::BeginPlay();
 	
 	/** Capture the default values set in Blueprint at start */
 	
@@ -68,6 +71,7 @@ void AProject_GMCharacter::BeginPlay()
 		HUDWidgetInstance = CreateWidget<UUserWidget>(GetWorld(), HUDWidgetClass);
 		if (HUDWidgetInstance) HUDWidgetInstance->AddToViewport();
 	}
+	Super::BeginPlay();
 }
 
 void AProject_GMCharacter::HandleFlyPhysics() const
